@@ -1,109 +1,92 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Plot gait storyboard directly with default parameters.
-Run simply:  python plot_gait_storyboard.py
+Generate one image per JSON file using OUMVLP skeleton (24 joints).
 """
 
-import zipfile, json, os, numpy as np, matplotlib.pyplot as plt
+import json, os, numpy as np, matplotlib.pyplot as plt
 
-# ---------- Default Configuration ----------
-DEFAULT_ZIP = r"C:\Work\GaitCognition\000_00-20251026T164710Z-1-001.zip"
-DEFAULT_OUT = r"C:\Work\GaitCognition\storyboard_cob.png"
-DEFAULT_SKEL = "0-1,0-2,1-3,5-7,7-9,6-8,8-10,5-6,11-12,5-11,6-12,11-13,12-14,13-15,14-16"
-DEFAULT_COLS = 20
-HIP_CENTER, SPINE, HIP_RIGHT, HIP_LEFT = 0, 1, 2, 3
-# -------------------------------------------------------
+# ---------- Config ----------
+ROOT_FOLDER = r"C:\Users\Ment\Downloads\10307"
+OUTPUT_FOLDER = r"C:\Users\Ment\Downloads\output"
 
-def parse_skel_edges(s):
-    edges = []
-    for part in s.split(","):
-        a, b = part.split("-")
-        edges.append((int(a), int(b)))
-    return edges
+# --------- OUMVLP Skeleton (24 joints) ----------
+# From OUMVLP-Mesh paper, Figure 5 (24-joint model)
+OUMVLP_EDGES = [
+    (0,1), (0,2),           
+    (1,4), (2,5),           
+    (4,7), (5,8),           
+    (7,10), (8,11),         
+    (0,3), (3,6), (6,9),    
+    (9,12), (12,15),        
+    (12,13), (12,14),       
+    (13,16), (14,17),       
+    (16,18), (17,19),       
+    (18,20), (19,21),       
+    (20,22), (21,23)        
+]
 
-def safe_norm(v):
-    n = np.linalg.norm(v)
-    return v / (n + 1e-12)
 
-def gram_schmidt_basis(hip_center, spine, hip_right, hip_left):
-    vs = spine - hip_center
-    vh = hip_left - hip_right
-    vh_orth = vh - (np.dot(vs, vh) / (np.dot(vs, vs) + 1e-12)) * vs
-    vd = np.cross(vh_orth, vs)
-    uh = safe_norm(vh_orth)
-    us = safe_norm(vs)
-    ud = safe_norm(vd)
-    return np.vstack([uh, us, ud])
-
-def to_cob_coords(joints_xyz):
-    hc, sp, hr, hl = joints_xyz[HIP_CENTER], joints_xyz[SPINE], joints_xyz[HIP_RIGHT], joints_xyz[HIP_LEFT]
-    B = gram_schmidt_basis(hc, sp, hr, hl)
-    P = joints_xyz - hc
-    return (B @ P.T).T
-
-def read_frame_from_text(txt):
-    txt = txt.strip()
+def read_frame_from_file(path):
     try:
-        obj = json.loads(txt)
+        data = open(path, "r", encoding="utf-8").read()
+        obj = json.loads(data)
         if "hc3d" in obj:
             arr = np.array(obj["hc3d"], dtype=float)
-            return arr[:, :3]
-    except Exception:
-        pass
-    return None
+            return arr[:, :3]   # X,Y,Z
+    except:
+        return None
 
-def load_frames_from_zip(zip_path):
-    frames = []
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        for name in sorted(zf.namelist()):
-            if not name.lower().endswith(".json"):
-                continue
-            data = zf.read(name).decode("utf-8", errors="ignore")
-            arr = read_frame_from_text(data)
-            if arr is not None:
-                frames.append(arr)
-    return frames
 
-def draw_skeleton(ax, pts, edges, title):
-    ax.scatter(pts[:, 0], pts[:, 1], s=20)
-    for a, b in edges:
-        if a < len(pts) and b < len(pts):
-            ax.plot([pts[a, 0], pts[b, 0]], [pts[a, 1], pts[b, 1]], linewidth=2)
-    ax.set_title(title, fontsize=10)
+def draw_single_frame(frame, out_path):
+    # ใช้แกนที่ถูกต้องของ SMPL/OUMVLP = X,Y
+    X = frame[:, 0]
+    Y = frame[:, 1]
+
+    fig, ax = plt.subplots(figsize=(5, 7))
+
+    # joints
+    ax.scatter(X, Y, s=25)
+
+    # bones
+    for a, b in OUMVLP_EDGES:
+        if a < len(frame) and b < len(frame):
+            ax.plot([X[a], X[b]], [Y[a], Y[b]], linewidth=2)
+
+    ax.set_title("OUMVLP Skeleton (X–Y view)")
+    ax.axis("equal")
+
+    # กลับด้าน
+    # ax.invert_yaxis()
+
     ax.axis("off")
-    ax.set_aspect("equal")
 
-def plot_storyboard(frames, edges, out_path, cols=4):
-    n = min(cols, len(frames))
-    idxs = np.linspace(0, len(frames) - 1, n, dtype=int)
-    sel = [frames[i] for i in idxs]
-    sel_cob = [to_cob_coords(f) for f in sel]
-
-    fig, axes = plt.subplots(2, n, figsize=(3.5 * n, 6))
-    if n == 1:
-        axes = np.array([[axes[0]], [axes[1]]])
-
-    for i, f in enumerate(sel):
-        draw_skeleton(axes[0, i], f[:, :2], edges, f"Frame {i}")
-    for i, f in enumerate(sel_cob):
-        draw_skeleton(axes[1, i], f[:, :2], edges, f"CoB {i}")
-
-    plt.tight_layout()
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     fig.savefig(out_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
-    print(f"✅ Saved: {out_path}")
+
+    print(f"📸 Saved: {out_path}")
+
 
 # ---------- Main ----------
 if __name__ == "__main__":
-    zip_path = DEFAULT_ZIP
-    out_path = DEFAULT_OUT
-    edges = parse_skel_edges(DEFAULT_SKEL)
-    frames = load_frames_from_zip(zip_path)
 
-    if not frames:
-        print(f"❌ No frames found in ZIP: {zip_path}")
-    else:
-        print(f"📦 Loaded {len(frames)} frames from {os.path.basename(zip_path)}")
-        plot_storyboard(frames, edges, out_path, cols=DEFAULT_COLS)
+    for subfolder in sorted(os.listdir(ROOT_FOLDER)):
+        sub_path = os.path.join(ROOT_FOLDER, subfolder)
+        if not os.path.isdir(sub_path):
+            continue
+
+        print(f"\n📂 Folder: {subfolder}")
+
+        out_dir = os.path.join(OUTPUT_FOLDER, subfolder)
+        os.makedirs(out_dir, exist_ok=True)
+
+        for filename in sorted(os.listdir(sub_path)):
+            if filename.endswith(".json"):
+                full_json = os.path.join(sub_path, filename)
+                frame = read_frame_from_file(full_json)
+
+                if frame is not None:
+                    out_file = os.path.join(out_dir, filename.replace(".json", ".png"))
+                    draw_single_frame(frame, out_file)
+    
