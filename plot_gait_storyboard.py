@@ -25,7 +25,7 @@ OUMVLP_EDGES = [
     (18,20), (19,21),       
     (20,22), (21,23)        
 ]
-#yes mae
+
 
 def read_frame_from_file(path):
     try:
